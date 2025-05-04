@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use bevy::{
     app::{App, Update},
     ecs::{
@@ -5,20 +6,18 @@ use bevy::{
         entity::Entity,
         event::{Event, EventReader},
         query::{Added, With, Without},
-        schedule::IntoSystemConfigs,
-        system::{Commands, Query, Res, ResMut, Resource},
+        resource::Resource,
+        system::{Commands, Query, Res, ResMut},
     },
     reflect::Reflect,
     time::Time,
 };
-use bevy_replicon::{
-    client::confirm_history::ConfirmHistory,
-    core::{
-        channels::RepliconChannel, common_conditions::client_connected,
-        replicon_client::RepliconClient,
-    },
-    prelude::{server_or_singleplayer, AppRuleExt, ClientEventAppExt, FromClient},
+use bevy_replicon::client::confirm_history::ConfirmHistory;
+use bevy_replicon::prelude::{
+    client_connected, server_or_singleplayer, AppRuleExt, ClientEventAppExt, FromClient,
+    RepliconClient,
 };
+use bevy_replicon::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::vec_deque::Iter;
 use std::collections::VecDeque;
@@ -88,7 +87,7 @@ pub fn owner_prediction_init_system(
     client: Res<RepliconClient>,
     mut commands: Commands,
 ) {
-    let client_id = client.id().expect("No client id id found");
+    let client_id = client.expect("No client id id found");
     for (e, id) in q_owners.iter() {
         if id.0 == client_id.get() {
             commands.entity(e).insert(Predicted);
@@ -118,9 +117,9 @@ pub fn server_update_system<
     mut move_events: EventReader<FromClient<E>>,
     mut subjects: Query<(&NetworkOwner, &mut C, &T), Without<Predicted>>,
 ) {
-    for FromClient { client_id, event } in move_events.read() {
+    for FromClient { client_entity, event } in move_events.read() {
         for (player, mut component, context) in &mut subjects {
-            if client_id.get() == player.0 {
+            if client_entity == player.0 {
                 component.apply_event(event, time.delta_secs(), context);
             }
         }

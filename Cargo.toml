@@ -3,26 +3,25 @@ name = "bevy_replicon_snap"
 version = "0.2.6"
 edition = "2021"
 authors = ["Ben Dzaebel <ben@bendz.dev>"]
-hompage = "bendz.dev"
 license = "MIT"
 repository = "https://github.com/Bendzae/bevy_replicon_snap"
 categories = ["game-development", "network-programming"]
 keywords = ["networking", "bevy", "snapshot", "interpolation", "prediction"]
 description = "High-level networking crate that extends the bevy_replicon crate to allow snapshot interpolation and client-side prediction"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-bevy = { version = "0.15", default_features = false }
-bevy_replicon = "0.29.1"
+bevy = { version = "0.16.0", default_features = false, features = [
+    "std",
+    "async_executor",
+] }
+bevy_replicon = "0.33"
 serde = "1.0"
-
+postcard = "1.1.1"
 bevy_replicon_snap_macros = { version = "0.2.0", path = "macros" }
 
 [dev-dependencies]
 clap = { version = "4.1", features = ["derive"] }
-bevy = { version = "0.15", default-features = true }
-bevy_replicon_renet = { git = "https://github.com/matoous/bevy_replicon_renet.git", branch = "md/bevy-0.15" }
+bevy = { version = "0.16", default-features = true }
 
 [package.metadata.commands]
 example_interpolation = "cargo run --example interpolated -- server & cargo run --example interpolated -- client && fg"

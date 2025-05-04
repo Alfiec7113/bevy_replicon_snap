@@ -1,30 +1,20 @@
 use std::{collections::VecDeque, io::Cursor};
 
 use bevy::{
-    app::{App, PreUpdate},
-    ecs::{
-        component::Component,
-        entity::Entity,
-        query::{Added, Or, With, Without},
-        schedule::IntoSystemConfigs,
-        system::{Commands, Query, Res},
-    },
-    prelude::Resource,
-    reflect::Reflect,
-    time::Time,
-    utils::default,
+    ecs::{component::Mutable, query::QueryData},
+    prelude::*,
 };
 use bevy_replicon::{
-    bincode,
-    core::replication::{
+    prelude::*,
+    shared::replication::{
         command_markers::MarkerConfig,
         deferred_entity::DeferredEntity,
         replication_registry::{
+            command_fns::MutWrite,
             ctx::{RemoveCtx, WriteCtx},
             rule_fns::RuleFns,
         },
     },
-    prelude::{client_connected, AppMarkerExt, AppRuleExt},
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -92,7 +82,9 @@ impl<T: Component + Interpolate + Clone> SnapshotBuffer<T> {
 }
 
 /// Interpolate between snapshots.
-pub fn snapshot_interpolation_system<T: Component + Interpolate + Clone>(
+pub fn snapshot_interpolation_system<
+    T: Component<Mutability = Mutable> + Interpolate + Clone + QueryData,
+>(
     mut q: Query<(&mut T, &mut SnapshotBuffer<T>), (With<Interpolated>, Without<Predicted>)>,
     time: Res<Time>,
     config: Res<SnapshotInterpolationConfig>,
@@ -130,8 +122,8 @@ pub fn write_snap_component<C: Clone + Interpolate + Component + DeserializeOwne
     ctx: &mut WriteCtx,
     rule_fns: &RuleFns<C>,
     entity: &mut DeferredEntity,
-    cursor: &mut Cursor<&[u8]>,
-) -> bincode::Result<()> {
+    cursor: &mut bevy_replicon::bytes::Bytes,
+) -> postcard::Result<()> {
     let component: C = rule_fns.deserialize(ctx, cursor)?;
     if let Some(mut buffer) = entity.get_mut::<SnapshotBuffer<C>>() {
         buffer.insert(component, ctx.message_tick.get());
@@ -189,7 +181,7 @@ impl AppInterpolationExt for App {
             ..default()
         })
         .set_marker_fns::<RecordSnapshotsMarker, T>(
-            write_snap_component,
+            write_snap_component::<T>,
             remove_snap_component::<T>,
         )
     }

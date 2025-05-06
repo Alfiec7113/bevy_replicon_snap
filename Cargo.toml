@@ -1,9 +1,10 @@
 [package]
 name = "bevy_replicon_snap"
 version = "0.2.6"
-edition = "2024"
+edition = "2021"
 authors = ["Ben Dzaebel <ben@bendz.dev>"]
 license = "MIT"
+homepage = "bendz.dev"
 repository = "https://github.com/Bendzae/bevy_replicon_snap"
 categories = ["game-development", "network-programming"]
 keywords = ["networking", "bevy", "snapshot", "interpolation", "prediction"]

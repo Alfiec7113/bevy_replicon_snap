@@ -14,15 +14,12 @@ use bevy::{
     time::Time,
 };
 use bevy_replicon::client::confirm_history::ConfirmHistory;
-use bevy_replicon::prelude::{
-    AppRuleExt, ClientEventAppExt, FromClient, client_connected, server_or_singleplayer, *,
-};
+use bevy_replicon::prelude::*;
 use bevy_replicon::shared::backend::connected_client::NetworkId;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::VecDeque;
 use std::collections::vec_deque::Iter;
 use std::fmt::Debug;
-use bevy_replicon_renet::renet::ClientId;
 use crate::{
     Interpolated, NetworkOwner, interpolation::Interpolate, interpolation::SnapshotBuffer,
 };
@@ -84,10 +81,10 @@ impl<T: Event> PredictedEventHistory<T> {
 
 pub fn owner_prediction_init_system(
     q_owners: Query<(Entity, &NetworkId), Added<OwnerPredicted>>,
-    client: Res<RepliconClient>,
+    // client: Res<RepliconClient>,
     mut commands: Commands,
 ) {
-    for (e, net_id) in q_owners.iter() {
+    for (e, _) in q_owners.iter() {
             commands.entity(e).insert(Predicted);
     }
 }
@@ -108,11 +105,10 @@ pub fn server_update_system<
     T: Component,
     C: Component<Mutability = Mutable> + Interpolate + Predict<E, T> + Clone,
 >(
-    mut move_events: Trigger<FromClient<E>>,
+    trigger: Trigger<FromClient<E>>,
     time: Res<Time>,
     mut subjects: Query<(&NetworkOwner, &mut C, &T), Without<Predicted>>,
 ) {
-    let trigger = move_events;
     for (player, mut component, context) in &mut subjects {
         if trigger.client_entity == player.0 {
             component.apply_event(trigger.event(), time.delta_secs(), context);
@@ -192,9 +188,7 @@ impl AppPredictionExt for App {
     {
         self.add_systems(
             Update,
-            (
-                predicted_update_system::<E, T, C>.run_if(client_connected)
-            )
+            predicted_update_system::<E, T, C>.run_if(client_connected)
         ).add_observer(server_update_system::<E, T, C>)
         .replicate::<T>()
     }

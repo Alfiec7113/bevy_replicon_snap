@@ -11,12 +11,15 @@ use bevy::{
     prelude::*,
     winit::{UpdateMode::Continuous, WinitSettings},
 };
+use bevy::ecs::query::QueryData;
 use bevy_replicon::prelude::*;
+use bevy_replicon::shared::backend::connected_client::NetworkId;
 use bevy_replicon_renet::{
     netcode::{ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication, ServerConfig}, renet::{
         ConnectionConfig, RenetClient, RenetServer,
     }, RenetChannelsExt, RepliconRenetPlugins
 };
+use bevy_replicon_renet::renet::{ClientId, ServerEvent};
 use bevy_replicon_snap::{
     interpolation::{AppInterpolationExt, Interpolated},
     NetworkOwner, SnapshotInterpolationPlugin,
@@ -58,19 +61,18 @@ impl Plugin for SimpleBoxPlugin {
     fn build(&self, app: &mut App) {
         app.replicate_interpolated::<PlayerPosition>()
             .replicate::<PlayerColor>()
-            .add_client_event::<MoveDirection>(ChannelKind::Ordered)
+            .add_client_trigger::<MoveDirection>(Channel::Ordered)
             .add_systems(
                 Startup,
                 (Self::cli_system.map(Result::unwrap), Self::init_system),
             )
             .add_systems(
                 Update,
-                (
-                    Self::movement_system.run_if(server_or_singleplayer), // Runs only on the server or a single player.
+                ( // Runs only on the server or a single player.
                     Self::server_event_system.run_if(server_running), // Runs only on the server.
                     (Self::draw_boxes_system, Self::input_system),
                 ),
-            );
+            ).add_observer(Self::movement_system);
     }
 }
 
@@ -83,14 +85,14 @@ impl SimpleBoxPlugin {
         match *cli {
             Cli::SinglePlayer => {
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    0,
                     Vec2::ZERO,
                     GREEN.into(),
                 ));
             }
             Cli::Server { port } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let server = RenetServer::new(ConnectionConfig {
                     server_channels_config,
@@ -122,14 +124,14 @@ impl SimpleBoxPlugin {
                     TextColor(WHITE.into()),
                 ));
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    0,
                     Vec2::ZERO,
                     GREEN.into(),
                 ));
             }
             Cli::Client { port, ip } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let client = RenetClient::new(ConnectionConfig {
                     server_channels_config,
@@ -204,7 +206,7 @@ impl SimpleBoxPlugin {
     }
 
     /// Reads player inputs and sends [`MoveCommandEvents`]
-    fn input_system(mut move_events: EventWriter<MoveDirection>, input: Res<ButtonInput<KeyCode>>) {
+    fn input_system(mut commands: Commands, input: Res<ButtonInput<KeyCode>>) {
         let mut direction = Vec2::ZERO;
         if input.pressed(KeyCode::ArrowRight) {
             direction.x += 1.0;
@@ -219,27 +221,26 @@ impl SimpleBoxPlugin {
             direction.y -= 1.0;
         }
         if direction != Vec2::ZERO {
-            move_events.send(MoveDirection(direction.normalize_or_zero()));
+            commands.client_trigger(MoveDirection(direction.normalize_or_zero()));
         }
     }
 
     /// Mutates [`PlayerPosition`] based on [`MoveCommandEvents`].
     ///
     /// Fast-paced games usually you don't want to wait until server send a position back because of the latency.
-    /// Tthis example just demonstrates simple replication concept with basic interpolation.
+    /// This example just demonstrates simple replication concept with basic interpolation.
     fn movement_system(
+        mut trigger: Trigger<FromClient<MoveDirection>>,
         time: Res<Time>,
-        mut move_events: EventReader<FromClient<MoveDirection>>,
-        mut players: Query<(&NetworkOwner, &mut PlayerPosition)>,
+        mut players: Query<(&NetworkOwner,&mut PlayerPosition)>,
     ) {
         const MOVE_SPEED: f32 = 300.0;
-        for FromClient { client_id, event } in move_events.read() {
-            for (player, mut position) in &mut players {
-                if client_id.get() == player.0 {
-                    **position += event.0 * time.delta_secs() * MOVE_SPEED;
-                }
-            }
-        }
+        let (_, mut position) = players
+            .iter_mut()
+            .find(|&(owner, _)| owner == trigger.client_entity)
+            .unwrap_or_else(|| panic!("`{}` should be connected", trigger.client_entity));
+
+        **position += *trigger.event * time.delta_secs() * MOVE_SPEED;
     }
 }
 
@@ -280,7 +281,7 @@ struct PlayerBundle {
 impl PlayerBundle {
     fn new(id: ClientId, position: Vec2, color: Color) -> Self {
         Self {
-            owner: NetworkOwner(id.get()),
+            owner: NetworkOwner(id),
             position: PlayerPosition(position),
             color: PlayerColor(color),
             replicated: Replicated,
@@ -296,5 +297,5 @@ struct PlayerPosition(Vec2);
 struct PlayerColor(Color);
 
 /// A movement event for the controlled box.
-#[derive(Debug, Default, Deserialize, Event, Serialize)]
+#[derive(Debug, Deref, Default, Deserialize, Event, Serialize)]
 struct MoveDirection(Vec2);

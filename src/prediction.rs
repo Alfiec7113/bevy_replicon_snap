@@ -1,3 +1,4 @@
+use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 use bevy::{
     app::{App, Update},
@@ -14,17 +15,16 @@ use bevy::{
 };
 use bevy_replicon::client::confirm_history::ConfirmHistory;
 use bevy_replicon::prelude::{
-    client_connected, server_or_singleplayer, AppRuleExt, ClientEventAppExt, FromClient,
-    RepliconClient,
+    AppRuleExt, ClientEventAppExt, FromClient, client_connected, server_or_singleplayer, *,
 };
-use bevy_replicon::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::vec_deque::Iter;
+use bevy_replicon::shared::backend::connected_client::NetworkId;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::VecDeque;
+use std::collections::vec_deque::Iter;
 use std::fmt::Debug;
-
+use bevy_replicon_renet::renet::ClientId;
 use crate::{
-    interpolation::Interpolate, interpolation::SnapshotBuffer, Interpolated, NetworkOwner,
+    Interpolated, NetworkOwner, interpolation::Interpolate, interpolation::SnapshotBuffer,
 };
 
 /// This trait defines how an event will mutate a given component
@@ -83,17 +83,12 @@ impl<T: Event> PredictedEventHistory<T> {
 }
 
 pub fn owner_prediction_init_system(
-    q_owners: Query<(Entity, &NetworkOwner), Added<OwnerPredicted>>,
+    q_owners: Query<(Entity, &NetworkId), Added<OwnerPredicted>>,
     client: Res<RepliconClient>,
     mut commands: Commands,
 ) {
-    let client_id = client.expect("No client id id found");
-    for (e, id) in q_owners.iter() {
-        if id.0 == client_id.get() {
+    for (e, net_id) in q_owners.iter() {
             commands.entity(e).insert(Predicted);
-        } else {
-            commands.entity(e).insert(Interpolated);
-        }
     }
 }
 
@@ -111,17 +106,16 @@ pub fn predicted_snapshot_system<T: Component + Interpolate + Clone>(
 pub fn server_update_system<
     E: Event,
     T: Component,
-    C: Component + Interpolate + Predict<E, T> + Clone,
+    C: Component<Mutability = Mutable> + Interpolate + Predict<E, T> + Clone,
 >(
+    mut move_events: Trigger<FromClient<E>>,
     time: Res<Time>,
-    mut move_events: EventReader<FromClient<E>>,
     mut subjects: Query<(&NetworkOwner, &mut C, &T), Without<Predicted>>,
 ) {
-    for FromClient { client_entity, event } in move_events.read() {
-        for (player, mut component, context) in &mut subjects {
-            if client_entity == player.0 {
-                component.apply_event(event, time.delta_secs(), context);
-            }
+    let trigger = move_events;
+    for (player, mut component, context) in &mut subjects {
+        if trigger.client_entity == player.0 {
+            component.apply_event(trigger.event(), time.delta_secs(), context);
         }
     }
 }
@@ -130,7 +124,7 @@ pub fn server_update_system<
 pub fn predicted_update_system<
     E: Event + Clone,
     T: Component,
-    C: Component + Interpolate + Predict<E, T> + Clone,
+    C: Component<Mutability = Mutable> + Interpolate + Predict<E, T> + Clone,
 >(
     mut q_predicted_players: Query<
         (&mut C, &SnapshotBuffer<C>, &ConfirmHistory, &T),
@@ -166,7 +160,7 @@ pub fn predicted_update_system<
 pub trait AppPredictionExt {
     /// Register an event for client-side prediction, this will make sure a history of past events
     /// is stored for the client to be able to replay them in case of a server correction
-    fn add_client_predicted_event<E>(&mut self, channel: impl Into<RepliconChannel>) -> &mut Self
+    fn add_client_predicted_event<E>(&mut self, channel: Channel) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone;
 
@@ -176,33 +170,32 @@ pub trait AppPredictionExt {
     fn predict_event_for_component<E, T, C>(&mut self) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone,
-        T: Component + Serialize + DeserializeOwned,
-        C: Component + Predict<E, T> + Clone;
+        T: Component<Mutability = Mutable> + Serialize + DeserializeOwned,
+        C: Component<Mutability = Mutable> + Predict<E, T> + Clone;
 }
 
 impl AppPredictionExt for App {
-    fn add_client_predicted_event<E>(&mut self, channel: impl Into<RepliconChannel>) -> &mut Self
+    fn add_client_predicted_event<E>(&mut self, channel: Channel) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone,
     {
         let history: PredictedEventHistory<E> = PredictedEventHistory::new();
         self.insert_resource(history);
-        self.add_client_event::<E>(channel)
+        self.add_client_trigger::<E>(channel)
     }
 
     fn predict_event_for_component<E, T, C>(&mut self) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone,
-        T: Component + Serialize + DeserializeOwned,
-        C: Component + Predict<E, T> + Clone,
+        T: Component<Mutability = Mutable> + Serialize + DeserializeOwned,
+        C: Component<Mutability = Mutable> + Predict<E, T> + Clone,
     {
         self.add_systems(
             Update,
             (
-                server_update_system::<E, T, C>.run_if(server_or_singleplayer), // Runs only on the server or a single player.
-                predicted_update_system::<E, T, C>.run_if(client_connected), // Runs only on clients.
-            ),
-        )
+                predicted_update_system::<E, T, C>.run_if(client_connected)
+            )
+        ).add_observer(server_update_system::<E, T, C>)
         .replicate::<T>()
     }
 }

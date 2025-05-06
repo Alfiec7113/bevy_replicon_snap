@@ -1,7 +1,7 @@
 [package]
 name = "bevy_replicon_snap"
 version = "0.2.6"
-edition = "2021"
+edition = "2024"
 authors = ["Ben Dzaebel <ben@bendz.dev>"]
 license = "MIT"
 repository = "https://github.com/Bendzae/bevy_replicon_snap"
@@ -10,14 +10,15 @@ keywords = ["networking", "bevy", "snapshot", "interpolation", "prediction"]
 description = "High-level networking crate that extends the bevy_replicon crate to allow snapshot interpolation and client-side prediction"
 
 [dependencies]
-bevy = { version = "0.16.0", default_features = false, features = [
+bevy = { version = "0.16.0", default-features = false, features = [
     "std",
     "async_executor",
 ] }
 bevy_replicon = "0.33"
 serde = "1.0"
-postcard = "1.1.1"
 bevy_replicon_snap_macros = { version = "0.2.0", path = "macros" }
+bevy_replicon_renet = { git = "https://github.com/projectharmonia/bevy_replicon_renet.git", branch = "bevy-0.16-dev" }
+uuid = "^1.13.1"
 
 [dev-dependencies]
 clap = { version = "4.1", features = ["derive"] }

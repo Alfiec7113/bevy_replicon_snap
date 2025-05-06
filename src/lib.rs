@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
+use bevy_replicon_renet::renet::ClientId;
 use serde::{Deserialize, Serialize};
 
 pub use bevy_replicon_snap_macros;
@@ -19,8 +20,11 @@ pub struct SnapshotInterpolationPlugin {
     pub max_tick_rate: u16,
 }
 
-#[derive(Component, Deserialize, Serialize, Reflect)]
-pub struct NetworkOwner(pub u64);
+#[derive(Component, Deserialize, Serialize, Reflect, Deref)]
+pub struct NetworkOwner(pub Entity);
+
+#[derive(Component, Deserialize, Serialize, Reflect, Deref)]
+pub struct ClientNetId(pub ClientId);
 
 /// Sets for interpolation systems.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]

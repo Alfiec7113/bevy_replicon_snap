@@ -18,6 +18,7 @@ use bevy_replicon_renet::{
     renet::{ConnectionConfig, RenetClient, RenetServer},
     RenetChannelsExt, RepliconRenetPlugins,
 };
+use bevy_replicon_renet::renet::{ClientId, ServerEvent};
 use bevy_replicon_snap::{
     interpolation::AppInterpolationExt,
     prediction::OwnerPredicted,
@@ -61,7 +62,7 @@ impl Plugin for SimpleBoxPlugin {
     fn build(&self, app: &mut App) {
         app.replicate_interpolated::<PlayerPosition>()
             .replicate::<PlayerColor>()
-            .add_client_predicted_event::<MoveDirection>(ChannelKind::Ordered)
+            .add_client_predicted_event::<MoveDirection>(Channel::Ordered)
             .predict_event_for_component::<MoveDirection, MovementSystemContext, PlayerPosition>()
             .add_systems(
                 Startup,
@@ -86,14 +87,14 @@ impl SimpleBoxPlugin {
         match *cli {
             Cli::SinglePlayer => {
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    SERVER,
                     Vec2::ZERO,
                     bevy::color::palettes::css::GREEN.into(),
                 ));
             }
             Cli::Server { port } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let server = RenetServer::new(ConnectionConfig {
                     server_channels_config,
@@ -125,14 +126,14 @@ impl SimpleBoxPlugin {
                     TextColor::WHITE,
                 ));
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    SERVER,
                     Vec2::ZERO,
                     bevy::color::palettes::css::GREEN.into(),
                 ));
             }
             Cli::Client { port, ip } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let client = RenetClient::new(ConnectionConfig {
                     server_channels_config,
@@ -179,11 +180,11 @@ impl SimpleBoxPlugin {
                 ServerEvent::ClientConnected { client_id } => {
                     info!("player: {client_id:?} Connected");
                     // Generate pseudo random color from client id.
-                    let r = ((client_id.get() % 23) as f32) / 23.0;
-                    let g = ((client_id.get() % 27) as f32) / 27.0;
-                    let b = ((client_id.get() % 39) as f32) / 39.0;
+                    let r = ((client_id % 23) as f32) / 23.0;
+                    let g = ((client_id % 27) as f32) / 27.0;
+                    let b = ((client_id % 39) as f32) / 39.0;
                     commands.spawn(PlayerBundle::new(
-                        *client_id,
+                        SERVER,
                         Vec2::ZERO,
                         Color::srgb(r, g, b),
                     ));
@@ -206,7 +207,7 @@ impl SimpleBoxPlugin {
     }
 
     /// Reads player inputs and sends [`MoveCommandEvents`]
-    fn input_system(mut move_events: EventWriter<MoveDirection>, input: Res<ButtonInput<KeyCode>>) {
+    fn input_system(input: Res<ButtonInput<KeyCode>>, mut commands: Commands) {
         let mut direction = Vec2::ZERO;
         if input.pressed(KeyCode::ArrowRight) {
             direction.x += 1.0;
@@ -221,7 +222,7 @@ impl SimpleBoxPlugin {
             direction.y -= 1.0;
         }
         if direction != Vec2::ZERO {
-            move_events.send(MoveDirection(direction.normalize_or_zero()));
+            commands.client_trigger(MoveDirection(direction.normalize_or_zero()));
         }
     }
 }
@@ -278,9 +279,9 @@ struct PlayerBundle {
 }
 
 impl PlayerBundle {
-    fn new(id: ClientId, position: Vec2, color: Color) -> Self {
+    fn new(id: Entity, position: Vec2, color: Color) -> Self {
         Self {
-            owner: NetworkOwner(id.get()),
+            owner: NetworkOwner(id),
             position: PlayerPosition(position),
             color: PlayerColor(color),
             replicated: Replicated,

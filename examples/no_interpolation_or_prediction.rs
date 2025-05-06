@@ -19,6 +19,7 @@ use bevy_replicon_renet::{
     renet::{ConnectionConfig, RenetClient, RenetServer},
     RenetChannelsExt, RepliconRenetPlugins,
 };
+use bevy_replicon_renet::renet::{ClientId, ServerEvent};
 
 // Setting a overly low server tickrate to make the difference between the different methods clearly visible
 // Usually you would want a server for a realtime game to run with at least 30 ticks per second
@@ -50,7 +51,7 @@ impl Plugin for SimpleBoxPlugin {
     fn build(&self, app: &mut App) {
         app.replicate::<PlayerPosition>()
             .replicate::<PlayerColor>()
-            .add_client_event::<MoveDirection>(ChannelKind::Ordered)
+            .add_client_event::<MoveDirection>(Channel::Ordered)
             .add_systems(
                 Startup,
                 (Self::cli_system.map(Result::unwrap), Self::init_system),
@@ -75,14 +76,14 @@ impl SimpleBoxPlugin {
         match *cli {
             Cli::SinglePlayer => {
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    0,
                     Vec2::ZERO,
                     bevy::color::palettes::css::GREEN.into(),
                 ));
             }
             Cli::Server { port } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let server = RenetServer::new(ConnectionConfig {
                     server_channels_config,
@@ -114,14 +115,14 @@ impl SimpleBoxPlugin {
                     TextColor::WHITE,
                 ));
                 commands.spawn(PlayerBundle::new(
-                    ClientId::SERVER,
+                    0,
                     Vec2::ZERO,
                     bevy::color::palettes::css::GREEN.into(),
                 ));
             }
             Cli::Client { port, ip } => {
-                let server_channels_config = channels.get_server_configs();
-                let client_channels_config = channels.get_client_configs();
+                let server_channels_config = channels.server_configs();
+                let client_channels_config = channels.client_configs();
 
                 let client = RenetClient::new(ConnectionConfig {
                     server_channels_config,
@@ -169,9 +170,9 @@ impl SimpleBoxPlugin {
                 ServerEvent::ClientConnected { client_id } => {
                     info!("player: {client_id:?} Connected");
                     // Generate pseudo random color from client id.
-                    let r = ((client_id.get() % 23) as f32) / 23.0;
-                    let g = ((client_id.get() % 27) as f32) / 27.0;
-                    let b = ((client_id.get() % 39) as f32) / 39.0;
+                    let r = ((client_id % 23) as f32) / 23.0;
+                    let g = ((client_id % 27) as f32) / 27.0;
+                    let b = ((client_id % 39) as f32) / 39.0;
                     commands.spawn(PlayerBundle::new(
                         *client_id,
                         Vec2::ZERO,
@@ -211,7 +212,7 @@ impl SimpleBoxPlugin {
             direction.y -= 1.0;
         }
         if direction != Vec2::ZERO {
-            move_events.send(MoveDirection(direction.normalize_or_zero()));
+            move_events.write(MoveDirection(direction.normalize_or_zero()));
         }
     }
 
@@ -220,19 +221,15 @@ impl SimpleBoxPlugin {
     /// Fast-paced games usually you don't want to wait until server send a position back because of the latency.
     /// But this example just demonstrates simple replication concept.
     fn movement_system(
+        mut trigger: Trigger<FromClient<MoveDirection>>,
         time: Res<Time>,
-        mut move_events: EventReader<FromClient<MoveDirection>>,
         mut players: Query<(&Player, &mut PlayerPosition)>,
     ) {
         const MOVE_SPEED: f32 = 300.0;
-        for FromClient { client_id, event } in move_events.read() {
-            info!("received event {event:?} from client {client_id:?}");
-            for (player, mut position) in &mut players {
-                if *client_id == player.0 {
-                    **position += event.0 * time.delta_secs() * MOVE_SPEED;
-                }
-            }
-        }
+        info!("received event {event:?} from client {client_id:?}");
+        let (_, position) = players.iter_mut().find(|&(owner, _)|
+            owner.0 == trigger.client_entity
+        )
     }
 }
 

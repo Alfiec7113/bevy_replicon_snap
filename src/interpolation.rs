@@ -1,9 +1,6 @@
 use std::collections::VecDeque;
 
-use bevy::{
-    ecs::{component::Mutable},
-    prelude::*,
-};
+use bevy::{ecs::component::Mutable, prelude::*};
 use bevy_replicon::{
     prelude::*,
     shared::replication::{
@@ -15,11 +12,11 @@ use bevy_replicon::{
         },
     },
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
+    prediction::{owner_prediction_init_system, predicted_snapshot_system, Predicted},
     InterpolationSet,
-    prediction::{Predicted, owner_prediction_init_system, predicted_snapshot_system},
 };
 
 pub trait Interpolate {
@@ -59,7 +56,7 @@ impl<T: Component + Interpolate + Clone> SnapshotBuffer<T> {
         }
     }
     pub fn insert(&mut self, element: T, tick: u32) {
-        if self.buffer.len() > 1 {
+        if self.buffer.len() > 9 {
             self.buffer.pop_front();
         }
         self.buffer.push_back(element);
@@ -81,9 +78,7 @@ impl<T: Component + Interpolate + Clone> SnapshotBuffer<T> {
 }
 
 /// Interpolate between snapshots.
-pub fn snapshot_interpolation_system<
-    T: Component<Mutability = Mutable> + Interpolate + Clone,
->(
+pub fn snapshot_interpolation_system<T: Component<Mutability=Mutable> + Interpolate + Clone>(
     mut q: Query<(&mut T, &mut SnapshotBuffer<T>), (With<Interpolated>, Without<Predicted>)>,
     time: Res<Time>,
     config: Res<SnapshotInterpolationConfig>,
@@ -122,7 +117,7 @@ pub fn write_snap_component<C: Clone + Interpolate + Component + DeserializeOwne
     rule_fns: &RuleFns<C>,
     entity: &mut DeferredEntity,
     cursor: &mut bevy_replicon::bytes::Bytes,
-) -> bevy::ecs::error::Result<()> {
+) -> Result<()> {
     let component: C = rule_fns.deserialize(ctx, cursor)?;
     if let Some(mut buffer) = entity.get_mut::<SnapshotBuffer<C>>() {
         buffer.insert(component, ctx.message_tick.get());
@@ -150,21 +145,13 @@ pub trait AppInterpolationExt {
     /// Requires the component to implement the Interpolate trait
     fn replicate_interpolated<C>(&mut self) -> &mut Self
     where
-        C: Component<Mutability = Mutable>
-            + Interpolate
-            + Clone
-            + Serialize
-            + DeserializeOwned;
+        C: Component<Mutability=Mutable> + Interpolate + Clone + Serialize + DeserializeOwned;
 }
 
 impl AppInterpolationExt for App {
     fn replicate_interpolated<T>(&mut self) -> &mut Self
     where
-        T: Component<Mutability = Mutable>
-            + Interpolate
-            + Clone
-            + Serialize
-            + DeserializeOwned,
+        T: Component<Mutability=Mutable> + Interpolate + Clone + Serialize + DeserializeOwned,
     {
         self.add_systems(
             PreUpdate,
@@ -182,14 +169,14 @@ impl AppInterpolationExt for App {
                 .in_set(InterpolationSet::Interpolate)
                 .run_if(client_connected),
         )
-        .replicate::<T>()
-        .register_marker_with::<RecordSnapshotsMarker>(MarkerConfig {
-            need_history: true,
-            ..default()
-        })
-        .set_marker_fns::<RecordSnapshotsMarker, T>(
-            write_snap_component::<T>,
-            remove_snap_component::<T>,
-        )
+            .replicate::<T>()
+            .register_marker_with::<RecordSnapshotsMarker>(MarkerConfig {
+                need_history: true,
+                ..default()
+            })
+            .set_marker_fns::<RecordSnapshotsMarker, T>(
+                write_snap_component::<T>,
+                remove_snap_component::<T>,
+            )
     }
 }

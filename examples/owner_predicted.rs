@@ -18,7 +18,6 @@ use bevy_replicon_renet::{
     renet::{ConnectionConfig, RenetClient, RenetServer},
     RenetChannelsExt, RepliconRenetPlugins,
 };
-use bevy_replicon_renet::renet::{ClientId, ServerEvent};
 use bevy_replicon_snap::{
     interpolation::AppInterpolationExt,
     prediction::OwnerPredicted,
@@ -29,9 +28,9 @@ use bevy_replicon_snap_macros::Interpolate;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-// Setting a overly low server tickrate to make the difference between the different methods clearly visible
+// Setting an overly low server tickrate to make the difference between the different methods clearly visible
 // Usually you would want a server for a realtime game to run with at least 30 ticks per second
-const MAX_TICK_RATE: u16 = 5;
+const MAX_TICK_RATE: u16 = 30;
 
 fn main() {
     App::new()
@@ -68,12 +67,11 @@ impl Plugin for SimpleBoxPlugin {
                 Startup,
                 (Self::cli_system.map(Result::unwrap), Self::init_system),
             )
+            .add_observer(Self::spawn_player)
+            .add_observer(Self::despawn_player)
             .add_systems(
                 Update,
-                (
-                    Self::server_event_system.run_if(resource_exists::<RenetServer>), // Runs only on the server.
-                    (Self::draw_boxes_system, Self::input_system),
-                ),
+                (Self::draw_boxes_system, Self::input_system),
             );
     }
 }
@@ -174,25 +172,17 @@ impl SimpleBoxPlugin {
     }
 
     /// Logs server events and spawns a new player whenever a client connects.
-    fn server_event_system(mut commands: Commands, mut server_event: EventReader<ServerEvent>) {
-        for event in server_event.read() {
-            match event {
-                ServerEvent::ClientConnected { client_id } => {
-                    info!("player: {client_id:?} Connected");
-                    // Generate pseudo random color from client id.
-                    let r = ((client_id % 23) as f32) / 23.0;
-                    let g = ((client_id % 27) as f32) / 27.0;
-                    let b = ((client_id % 39) as f32) / 39.0;
-                    commands.spawn(PlayerBundle::new(
-                        SERVER,
-                        Vec2::ZERO,
-                        Color::srgb(r, g, b),
-                    ));
-                }
-                ServerEvent::ClientDisconnected { client_id, reason } => {
-                    info!("client {client_id:?} disconnected: {reason}");
-                }
-            }
+    fn spawn_player(trigger: Trigger<OnAdd, ConnectedClient>, mut commands: Commands) {
+        commands.spawn(
+            PlayerBundle::new(trigger.target(), Vec2::ZERO, Color::WHITE)
+        );
+    }
+
+    fn despawn_player(trigger: Trigger<OnRemove, ConnectedClient>, mut commands: Commands) {
+        if let Ok(mut player) = commands.get_entity(trigger.target()) {
+            player.despawn();
+        } else {
+            info!("No player to de-spawn")
         }
     }
 

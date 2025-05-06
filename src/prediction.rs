@@ -1,3 +1,6 @@
+use crate::{
+    interpolation::Interpolate, interpolation::SnapshotBuffer, Interpolated, NetworkOwner,
+};
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 use bevy::{
@@ -16,13 +19,10 @@ use bevy::{
 use bevy_replicon::client::confirm_history::ConfirmHistory;
 use bevy_replicon::prelude::*;
 use bevy_replicon::shared::backend::connected_client::NetworkId;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::collections::VecDeque;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::vec_deque::Iter;
+use std::collections::VecDeque;
 use std::fmt::Debug;
-use crate::{
-    Interpolated, NetworkOwner, interpolation::Interpolate, interpolation::SnapshotBuffer,
-};
 
 /// This trait defines how an event will mutate a given component
 /// and is required for prediction.
@@ -80,12 +80,17 @@ impl<T: Event> PredictedEventHistory<T> {
 }
 
 pub fn owner_prediction_init_system(
-    q_owners: Query<(Entity, &NetworkId), Added<OwnerPredicted>>,
+    trigger: Trigger<OnAdd,OwnerPredicted>,
+    q_owners: Query<(Entity, &NetworkId)>,
     // client: Res<RepliconClient>,
     mut commands: Commands,
 ) {
     for (e, _) in q_owners.iter() {
+        if e == trigger.target(){
             commands.entity(e).insert(Predicted);
+        } else {
+            commands.entity(e).insert(Interpolated);
+        }        
     }
 }
 
@@ -103,7 +108,7 @@ pub fn predicted_snapshot_system<T: Component + Interpolate + Clone>(
 pub fn server_update_system<
     E: Event,
     T: Component,
-    C: Component<Mutability = Mutable> + Interpolate + Predict<E, T> + Clone,
+    C: Component<Mutability=Mutable> + Interpolate + Predict<E, T> + Clone,
 >(
     trigger: Trigger<FromClient<E>>,
     time: Res<Time>,
@@ -111,6 +116,7 @@ pub fn server_update_system<
 ) {
     for (player, mut component, context) in &mut subjects {
         if trigger.client_entity == player.0 {
+            println!("Server");
             component.apply_event(trigger.event(), time.delta_secs(), context);
         }
     }
@@ -120,26 +126,25 @@ pub fn server_update_system<
 pub fn predicted_update_system<
     E: Event + Clone,
     T: Component,
-    C: Component<Mutability = Mutable> + Interpolate + Predict<E, T> + Clone,
+    C: Component<Mutability=Mutable> + Interpolate + Predict<E, T> + Clone,
 >(
+    local_events: Trigger<FromClient<E>>,
     mut q_predicted_players: Query<
         (&mut C, &SnapshotBuffer<C>, &ConfirmHistory, &T),
         (With<Predicted>, Without<Interpolated>),
     >,
-    mut local_events: EventReader<E>,
     mut event_history: ResMut<PredictedEventHistory<E>>,
     time: Res<Time>,
 ) {
     // Apply all pending inputs to latest snapshot
     for (mut component, snapshot_buffer, confirmed, context) in q_predicted_players.iter_mut() {
         // Append the latest input event
-        for event in local_events.read() {
-            event_history.insert(
-                event.clone(),
-                confirmed.last_tick().get(),
-                time.delta_secs(),
-            );
-        }
+        event_history.insert(
+            local_events.event.clone(),
+            confirmed.last_tick().get(),
+            time.delta_secs(),
+        );
+
 
         let mut corrected_component = snapshot_buffer.latest_snapshot();
         for event_snapshot in event_history.predict(snapshot_buffer.latest_snapshot_tick()) {
@@ -149,6 +154,7 @@ pub fn predicted_update_system<
                 context,
             );
         }
+        println!("C");
         *component = corrected_component;
     }
 }
@@ -166,8 +172,8 @@ pub trait AppPredictionExt {
     fn predict_event_for_component<E, T, C>(&mut self) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone,
-        T: Component<Mutability = Mutable> + Serialize + DeserializeOwned,
-        C: Component<Mutability = Mutable> + Predict<E, T> + Clone;
+        T: Component<Mutability=Mutable> + Serialize + DeserializeOwned,
+        C: Component<Mutability=Mutable> + Predict<E, T> + Clone;
 }
 
 impl AppPredictionExt for App {
@@ -183,13 +189,13 @@ impl AppPredictionExt for App {
     fn predict_event_for_component<E, T, C>(&mut self) -> &mut Self
     where
         E: Event + Serialize + DeserializeOwned + Debug + Clone,
-        T: Component<Mutability = Mutable> + Serialize + DeserializeOwned,
-        C: Component<Mutability = Mutable> + Predict<E, T> + Clone,
+        T: Component<Mutability=Mutable> + Serialize + DeserializeOwned,
+        C: Component<Mutability=Mutable> + Predict<E, T> + Clone,
     {
-        self.add_systems(
-            Update,
-            predicted_update_system::<E, T, C>.run_if(client_connected)
-        ).add_observer(server_update_system::<E, T, C>)
-        .replicate::<T>()
+        self.add_observer(
+            predicted_update_system::<E, T, C>
+        )
+            .add_observer(server_update_system::<E, T, C>)
+            .replicate::<T>()
     }
 }

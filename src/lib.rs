@@ -53,11 +53,8 @@ impl Plugin for SnapshotInterpolationPlugin {
                 PreUpdate,
                 InterpolationSet::Interpolate.after(InterpolationSet::Init),
             )
-            .add_systems(
-                Update,
+            .add_observer(
                 owner_prediction_init_system
-                    .run_if(client_connected)
-                    .in_set(InterpolationSet::Init),
             )
             .insert_resource(SnapshotInterpolationConfig {
                 max_tick_rate: self.max_tick_rate,

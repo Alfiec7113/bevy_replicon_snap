@@ -6,20 +6,23 @@ use std::{
     time::SystemTime,
 };
 
+use bevy::ecs::query::QueryData;
 use bevy::{
     color::palettes::css::{GREEN, WHITE},
     prelude::*,
     winit::{UpdateMode::Continuous, WinitSettings},
 };
-use bevy::ecs::query::QueryData;
 use bevy_replicon::prelude::*;
 use bevy_replicon::shared::backend::connected_client::NetworkId;
-use bevy_replicon_renet::{
-    netcode::{ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication, ServerConfig}, renet::{
-        ConnectionConfig, RenetClient, RenetServer,
-    }, RenetChannelsExt, RepliconRenetPlugins
-};
 use bevy_replicon_renet::renet::{ClientId, ServerEvent};
+use bevy_replicon_renet::{
+    netcode::{
+        ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication,
+        ServerConfig,
+    },
+    renet::{ConnectionConfig, RenetClient, RenetServer},
+    RenetChannelsExt, RepliconRenetPlugins,
+};
 use bevy_replicon_snap::{
     interpolation::{AppInterpolationExt, Interpolated},
     NetworkOwner, SnapshotInterpolationPlugin,
@@ -68,11 +71,13 @@ impl Plugin for SimpleBoxPlugin {
             )
             .add_systems(
                 Update,
-                ( // Runs only on the server or a single player.
+                (
+                    // Runs only on the server or a single player.
                     Self::server_event_system.run_if(server_running), // Runs only on the server.
                     (Self::draw_boxes_system, Self::input_system),
                 ),
-            ).add_observer(Self::movement_system);
+            )
+            .add_observer(Self::movement_system);
     }
 }
 
@@ -84,11 +89,7 @@ impl SimpleBoxPlugin {
     ) -> Result<(), Box<dyn Error>> {
         match *cli {
             Cli::SinglePlayer => {
-                commands.spawn(PlayerBundle::new(
-                    0,
-                    Vec2::ZERO,
-                    GREEN.into(),
-                ));
+                commands.spawn(PlayerBundle::new(0, Vec2::ZERO, GREEN.into()));
             }
             Cli::Server { port } => {
                 let server_channels_config = channels.server_configs();
@@ -123,11 +124,7 @@ impl SimpleBoxPlugin {
                     },
                     TextColor(WHITE.into()),
                 ));
-                commands.spawn(PlayerBundle::new(
-                    0,
-                    Vec2::ZERO,
-                    GREEN.into(),
-                ));
+                commands.spawn(PlayerBundle::new(0, Vec2::ZERO, GREEN.into()));
             }
             Cli::Client { port, ip } => {
                 let server_channels_config = channels.server_configs();
@@ -232,12 +229,12 @@ impl SimpleBoxPlugin {
     fn movement_system(
         mut trigger: Trigger<FromClient<MoveDirection>>,
         time: Res<Time>,
-        mut players: Query<(&NetworkOwner,&mut PlayerPosition)>,
+        mut players: Query<(&NetworkOwner, &mut PlayerPosition)>,
     ) {
         const MOVE_SPEED: f32 = 300.0;
         let (_, mut position) = players
             .iter_mut()
-            .find(|&(owner, _)| owner == trigger.client_entity)
+            .find(|&(owner, _)| owner.0 == trigger.client_entity)
             .unwrap_or_else(|| panic!("`{}` should be connected", trigger.client_entity));
 
         **position += *trigger.event * time.delta_secs() * MOVE_SPEED;
@@ -279,7 +276,7 @@ struct PlayerBundle {
 }
 
 impl PlayerBundle {
-    fn new(id: ClientId, position: Vec2, color: Color) -> Self {
+    fn new(id: Entity, position: Vec2, color: Color) -> Self {
         Self {
             owner: NetworkOwner(id),
             position: PlayerPosition(position),

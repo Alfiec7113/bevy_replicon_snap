@@ -42,7 +42,7 @@ pub struct EventSnapshot<T: Event> {
 #[derive(Resource)]
 pub struct PredictedEventHistory<T: Event>(pub VecDeque<EventSnapshot<T>>);
 
-#[derive(Component, Deserialize, Serialize, Reflect)]
+#[derive(Component, Deserialize, Serialize, Reflect, Default)]
 pub struct OwnerPredicted;
 
 #[derive(Component, Reflect)]
@@ -80,17 +80,17 @@ impl<T: Event> PredictedEventHistory<T> {
 }
 
 pub fn owner_prediction_init_system(
-    trigger: Trigger<OnAdd,OwnerPredicted>,
+    trigger: Trigger<OnAdd, OwnerPredicted>,
     q_owners: Query<(Entity, &NetworkId)>,
     // client: Res<RepliconClient>,
     mut commands: Commands,
 ) {
     for (e, _) in q_owners.iter() {
-        if e == trigger.target(){
+        if e == trigger.target() {
             commands.entity(e).insert(Predicted);
         } else {
             commands.entity(e).insert(Interpolated);
-        }        
+        }
     }
 }
 
